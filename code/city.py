@@ -159,6 +159,7 @@ class City:
     
     # Assigning BGs to Zones
     def assign_bg2zones(self) -> None:
+        print(self.blockgroup_centroids)
         self.bg2zones = (
             self.blockgroup_centroids
             .to_crs(self.proj)

@@ -1,0 +1,314 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Note Get the census data from 7
+
+```{r}
+library(tidyverse)
+library(dtplyr)
+```
+
+```{r}
+setwd('~/Documents/Grad School/Berkeley/Classes/CYP_204D - Multivariate Analysis in Planning/final_project_redo/code')
+# df_phi <- read_csv('../data/exports/phi_zones_raw_trips.csv') %>% select(-`...1`)
+# df_chi <- read_csv('../data/exports/chi_zones_raw_trips.csv') %>% select(-`...1`)
+# df_nyc <- read_csv('../data/exports/nyc_zones_raw_trips.csv') %>% select(-`...1`)
+# df_sfba <- read_csv('../data/exports/sfba_zones_raw_trips.csv') %>% select(-`...1`)
+
+df_phi2 <- read_csv('../data/exports/phi2_zones_raw_trips.csv') %>% select(-`...1`)
+df_chi2 <- read_csv('../data/exports/chi2_zones_raw_trips.csv') %>% select(-`...1`)
+df_nyc2 <- read_csv('../data/exports/nyc2_zones_raw_trips.csv') %>% select(-`...1`)
+# df_sfba2 <- read_csv('../data/exports/sfba2_zones_raw_trips.csv') %>% select(-`...1`)
+df_census <- read_csv('../data/exports/bg2census.csv')
+```
+
+## Create Modeling Dataset
+```{r}
+df_modeling.phi <- 
+  df_phi2 %>%
+  rename(
+    fips12_o = O_bg_fips,
+    fips12_d = D_bg_fips
+  ) %>%
+  mutate(
+    fips12_o = str_pad(fips12_o, 12, 'left', '0'),
+    fips12_d = str_pad(fips12_d, 12, 'left', '0')
+  ) %>%
+  mutate(
+    active_transit = case_when(
+      primary_mode %in% c('walking','biking') ~ 1,
+      primary_mode %in% c('public_transit', 'commercial') ~ NA,
+      .default = 0
+    ),
+    dist_km = dist_m/1000,
+    extra_zonal = if_else(zone_same, 0, 1)
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_o')),
+    by = c('fips12_o'='fips12_o')
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_d')),
+    by = c('fips12_d'='fips12_d')
+  )# %>% 
+  #filter(!is.na(active_transit))
+
+rm(df_phi2)
+
+df_modeling.chi <- 
+  df_chi2 %>%
+  rename(
+    fips12_o = O_bg_fips,
+    fips12_d = D_bg_fips
+  ) %>%
+  mutate(
+    fips12_o = str_pad(fips12_o, 12, 'left', '0'),
+    fips12_d = str_pad(fips12_d, 12, 'left', '0')
+  ) %>%
+  mutate(
+    active_transit = case_when(
+      primary_mode %in% c('walking','biking') ~ 1,
+      primary_mode %in% c('public_transit', 'commercial') ~ NA,
+      .default = 0
+    ),
+    dist_km = dist_m/1000,
+    extra_zonal = if_else(zone_same, 0, 1)
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_o')),
+    by = c('fips12_o'='fips12_o')
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_d')),
+    by = c('fips12_d'='fips12_d')
+  )
+
+rm(df_chi2)
+
+model1 <- glm(
+  active_transit ~ dist_km + extra_zonal,
+  family = 'binomial',
+  data = df_modeling.chi %>%
+    filter(!is.na(active_transit))
+)
+
+summary(model1)
+```
+
+## NYC `df.modeling`
+```{r}
+df_modeling.nyc <- 
+  df_nyc2 %>%
+  rename(
+    fips12_o = O_bg_fips,
+    fips12_d = D_bg_fips
+  ) %>%
+  mutate(
+    fips12_o = str_pad(fips12_o, 12, 'left', '0'),
+    fips12_d = str_pad(fips12_d, 12, 'left', '0')
+  ) %>%
+  mutate(
+    active_transit = case_when(
+      primary_mode %in% c('walking','biking') ~ 1,
+      primary_mode %in% c('public_transit', 'commercial') ~ NA,
+      .default = 0
+    ),
+    dist_km = dist_m/1000,
+    extra_zonal = if_else(zone_same, 0, 1)
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_o')),
+    by = c('fips12_o'='fips12_o')
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_d')),
+    by = c('fips12_d'='fips12_d')
+  )
+
+rm(df_nyc2)
+
+```
+
+## SFBA `df.modeling`
+```{r}
+df_modeling.sfba <- 
+  df_sfba2 %>%
+  rename(
+    fips12_o = O_bg_fips,
+    fips12_d = D_bg_fips
+  ) %>%
+  mutate(
+    fips12_o = str_pad(fips12_o, 12, 'left', '0'),
+    fips12_d = str_pad(fips12_d, 12, 'left', '0')
+  ) %>%
+  mutate(
+    active_transit = case_when(
+      primary_mode %in% c('walking','biking') ~ 1,
+      primary_mode %in% c('public_transit', 'commercial') ~ NA,
+      .default = 0
+    ),
+    dist_km = dist_m/1000,
+    extra_zonal = if_else(zone_same, 0, 1)
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_o')),
+    by = c('fips12_o'='fips12_o')
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_d')),
+    by = c('fips12_d'='fips12_d')
+  )
+```
+
+# Basic Visualization
+```{r}
+`%notin%` <- Negate(`%in%`)
+
+df_modeling.sfba %>% #group_by(primary_mode) %>% summarize(n())
+  filter(dist_km < 4) %>%
+  mutate(
+    bin = floor(dist_km * 2)/2,
+  ) %>%
+  group_by(
+    bin, extra_zonal
+  ) %>%
+  summarize(
+    share_active = sum(primary_mode %in% c('walking','biking'))/sum(primary_mode %notin% c('commercial','public_transit')),
+    share_transit = sum(primary_mode == 'public_transit')/sum(primary_mode != 'commercial')
+  ) %>% 
+  ggplot(aes(x = bin, #y = share_transit, 
+             y = share_active, 
+             fill = as_factor(extra_zonal), group = as_factor(extra_zonal))) + 
+  geom_bar(stat='identity', position = 'dodge') + 
+  labs(
+    y = 'Share of Trips Active',
+    x = 'Distance (km)',
+    fill = 'Extra Zonal'
+  )# + 
+  facet_wrap(~as_factor(extra_zonal))
+
+
+df_modeling.1 %>%
+  filter(dist_km < 4) %>%
+  filter()
+```
+
+
+```{r}
+`%notin%` <- Negate(`%in%`)
+# PHI
+df_modeling.phi2.add <- 
+  df_modeling.phi %>%
+  filter(dist_km < 4) %>% 
+  filter(fips12_o != fips12_d) %>%
+  left_join(
+    df_modeling.phi %>%
+      group_by(fips12_o) %>%
+      summarize(
+        BG_active_share = sum(primary_mode %in% c('walking','biking'))/sum(primary_mode %notin% c('public_transit','commercial')),
+        BG_transit_share = sum(primary_mode %in% c('public_transit'))/sum(primary_mode != 'commercial'),
+      ),
+    by = c('fips12_o'= 'fips12_o')
+  )
+
+# CHI
+df_modeling.chi2.add <- 
+  df_modeling.chi %>%
+  filter(dist_km < 4) %>% 
+  filter(fips12_o != fips12_d) %>%
+  left_join(
+    df_modeling.chi %>%
+      group_by(fips12_o) %>%
+      summarize(
+        BG_active_share = sum(primary_mode %in% c('walking','biking'))/sum(primary_mode %notin% c('public_transit','commercial')),
+        BG_transit_share = sum(primary_mode %in% c('public_transit'))/sum(primary_mode != 'commercial'),
+      ),
+    by = c('fips12_o'= 'fips12_o')
+  )
+
+# NYC
+df_modeling.nyc2.add <- 
+  df_modeling.nyc %>%
+  filter(dist_km < 4) %>% 
+  filter(fips12_o != fips12_d) %>%
+  left_join(
+    df_modeling.nyc %>%
+      group_by(fips12_o) %>%
+      summarize(
+        BG_active_share = sum(primary_mode %in% c('walking','biking'))/sum(primary_mode %notin% c('public_transit','commercial')),
+        BG_transit_share = sum(primary_mode %in% c('public_transit'))/sum(primary_mode != 'commercial'),
+      ),
+    by = c('fips12_o'= 'fips12_o')
+  )
+
+# SFBA
+df_modeling.sfba2.add <- 
+  df_modeling.sfba %>%
+  filter(dist_km < 4) %>% 
+  filter(fips12_o != fips12_d) %>%
+  left_join(
+    df_modeling.sfba %>%
+      group_by(fips12_o) %>%
+      summarize(
+        BG_active_share = sum(primary_mode %in% c('walking','biking'))/sum(primary_mode %notin% c('public_transit','commercial')),
+        BG_transit_share = sum(primary_mode %in% c('public_transit'))/sum(primary_mode != 'commercial'),
+      ),
+    by = c('fips12_o'= 'fips12_o')
+  )
+
+
+EXPORT_COLS <- c('activity_id', 'fips12_o', 'fips12_d', 'primary_mode', 'zoneID_o', 'zoneID_d', 'active_transit', 'dist_km', 'extra_zonal', 'metro_o', 'fips5_o', 'total_pop_o', 'medinc_o', 'veh_pp_o', 'veh_commute_pp_o', 'medinc_Z_o', 'metro_d', 'fips5_d', 'total_pop_d', 'medinc_d', 'veh_pp_d', 'veh_commute_pp_d', 'medinc_Z_d', 'BG_active_share', 'BG_transit_share')
+
+df_modeling.phi2.add %>%
+  select(!!EXPORT_COLS) %>%
+  write_csv('../data/modeling_files/phi_regression_file.csv')
+df_modeling.nyc2.add %>% 
+  filter(dist_km < 4) %>% 
+  select(!!EXPORT_COLS) %>%
+  write_csv('../data/modeling_files/nyc_regression_file.csv')
+df_modeling.chi2.add %>% 
+  filter(dist_km < 4) %>% 
+  select(!!EXPORT_COLS) %>%
+  write_csv('../data/modeling_files/chi_regression_file.csv')
+df_modeling.sfba2.add %>% 
+  filter(dist_km < 4) %>% 
+  select(!!EXPORT_COLS) %>%
+  write_csv('../data/modeling_files/sfba_regression_file.csv')
+
+rm(df_modeling.nyc2.add)
+rm(df_modeling.chi2.add)
+rm(df_modeling.phi2.add)
+```
+
+# Modeling with BG averages
+```{r}
+model.test <- glm(
+  active_transit ~ dist_km + extra_zonal + BG_active_share + BG_transit_share,
+  family = 'binomial',
+  data = df_modeling.nyc2.add %>%
+    filter(!is.na(active_transit))
+)
+
+model.test.sfba <- glm(
+  active_transit ~ dist_km + extra_zonal + BG_active_share + BG_transit_share,
+  family = 'binomial',
+  data = df_modeling.sfba %>%
+    filter(!is.na(active_transit))
+)
+
+summary(model.test)
+
+df_modeling.phi2.add.
+```

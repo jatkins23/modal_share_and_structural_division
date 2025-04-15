@@ -1,0 +1,706 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+```{r env}
+library(tidyverse)
+library(dtplyr)
+```
+
+
+```{r get-data}
+library(DBI)
+library(RPostgres)
+library(getPass)
+
+host <- "127.0.0.1"
+port <- 5432
+db <- 'gradschool'
+usr <- 'postgres'
+
+
+conn <- DBI::dbConnect(RPostgres::Postgres(), user=usr, password=getPass::getPass(), dbname=db)
+stopifnot(DBI::dbIsValid(conn))
+
+
+dfs <- list()
+for(metro in c('chi','phi','nyc','sfba')) {
+  print(paste0(metro, '..'))
+  dfs[[metro]] <- tbl(conn, DBI::Id('cyp204d_final_project', paste0(metro, '_final_datasets'))) %>%
+    as_tibble() %>%
+    collect()
+}
+```
+
+```{r}
+setwd('~/Documents/Grad School/Berkeley/Classes/CYP_204D - Multivariate Analysis in Planning/final_project_redo/code')
+df_phi <- read_csv('data/exports/phi_zones_raw_trips.csv') %>% select(-`...1`)
+
+```
+
+
+## Clean Data
+```{r}
+modes <- c('auto_passenger', 'biking', 'commercial', 'on_demand_auto','other_travel_mode', 'private_auto', 'public_transit', 'walking')
+
+for(metro in c('chi','phi','nyc','sfba')) {
+  dfs[[metro]] <- 
+    dfs[[metro]] %>% 
+    mutate(
+      active_share = (walking + biking)/(auto_passenger + on_demand_auto + private_auto + walking + biking + public_transit),
+      car_share = (auto_passenger + on_demand_auto + private_auto)/(walking + biking + auto_passenger + on_demand_auto + private_auto + public_transit)
+    )
+}
+
+df_combined <- dfs %>% bind_rows(.id = 'metro')
+
+```
+
+## Gather More Data
+
+### Get Census data
+```{r}
+# census2020_vars <- tidycensus::load_variables(2020, 'dhc', TRUE)
+# census2020_vars %>% separate(col = 'label', into = paste0('col', seq(1,10)), sep = '!!') %>% distinct(col3) %>% View()
+# tidycensus::load_variables(2020, 'dp', TRUE) %>% separate(col = 'label', into = paste0('col', seq(1,10)), sep = '!!') %>% distinct(col3) %>% View()
+# 
+# # Full acs5
+# median_income_cols <- 
+#   tidycensus::load_variables(2022, 'acs5', TRUE) %>% 
+#   separate(col = 'label', into = paste0('col', seq(1,10)), sep = '!!') %>%
+#   filter(str_detect(col2, 'income'), col3 == 'Total:', is.na(col4)) %>%
+#   select(name, col2)
+# 
+# # Pull income cols from ACS at BG level for CA
+# CA_acs_income_cols <- tidycensus::get_acs(variables = median_income_cols$name, year = 2022, geography = 'block group', state = 'CA')
+# 
+# # figure out which ones aren't null at block group level
+# CA_acs_income_cols %>%  
+#   filter(!is.na(estimate)) %>% # 47.9k
+#   distinct(variable, .keep_all = TRUE) # only B19049_001, B25092_001
+# 
+# # Let's check what those are
+# median_income_cols %>%
+#   filter(name %in% c('B19049_001', 'B25092_001')) # ok, B19049_001 is my guy, B25092_001 is owner housing costs 
+
+```
+
+### Get all for each state
+```{r}
+# Create summary of each county
+STATES.counties <-
+  df_combined %>%
+  mutate(fips5 = substr(fips12_o, 1, 5)) %>%
+  group_by(metro, fips5) %>%
+  summarize(n_BGs = n_distinct(fips12_o)) %>%
+  mutate(fips2 = substr(fips5, 1,2)) %>%
+  inner_join(
+    tidycensus::fips_codes %>% 
+      distinct(state, state_code),
+    by = c('fips2' = 'state_code')
+  )
+  
+# Loop to get acs vars
+# dfs.med_inc <- list()
+# for(m in unique(STATES.counties$metro)) {
+#   cat(paste0(m, '..'))
+#   # filter to dict
+#   metro_counties <- 
+#     STATES.counties %>%
+#     filter(metro == m)
+#   
+#   dfs.med_inc[[m]] <- 
+#     tidycensus::get_acs(variables = 'B19049_001', year = 2023, geography = 'block group', state = unique(metro_counties$state)) %>%
+#     mutate(fips5 = substr(GEOID, 1,5)) %>%
+#     inner_join(
+#       metro_counties,
+#       by = c('fips5' = 'fips5')
+#     )
+# }
+# 
+# # Combine
+# df.med_inc <- 
+#   dfs.med_inc %>% 
+#   bind_rows(.id = 'metro')
+# 
+# # Med Inc
+# df.med_inc %>% 
+#   ggplot(aes(x = estimate)) + 
+#   geom_histogram(bins = 50) + 
+#   facet_wrap(~metro) # weird the huge spike at 250k, but I guess that's the maximum?
+# 
+# ```
+# 
+# ### Join in to census
+# ```{r}
+# mean(str_length(df.med_inc$GEOID) == 12) # all are 12
+# df_combined <- 
+#   df_combined %>%
+#   inner_join(
+#     df.med_inc %>%
+#       select(GEOID, o_medinc = estimate),
+#     by = c('fips12_o'='GEOID')
+#   ) %>%
+#   inner_join(
+#     df.med_inc %>%
+#       select(GEOID, d_medinc = estimate),
+#     by = c('fips12_d'='GEOID')
+#   ) 
+# 
+# # 
+```
+
+
+### Scales
+```{r}
+# df_combined$d_medinc_Z <- scale(df_combined$d_medinc)[,1]
+# df_combined$o_medinc_Z <- scale(df_combined$o_medinc)[,1]
+
+```
+
+
+## Redo for Car ownership rates
+```{r}
+# car_ownership_cols <- 
+#   tidycensus::load_variables(2023, 'acs5', TRUE) %>% 
+#   separate(col = 'label', into = paste0('col', seq(1,10)), sep = '!!') %>%
+#   filter(str_detect(col3, 'vehicle'), col2 == 'Total:', is.na(col4)) %>%
+#   select(name, col2)
+# 
+# car_ownership_cols[str_detect(car_ownership_cols$label, 'vehicle'), ]
+# 
+# # Results
+# # 'B25046_001' Aggregate Number of Vehicles available - so only this 
+# # 'B08015_001' Aggregate Number of Vehicles used in commuting
+# 
+# # Check geo-level
+# temp <- tidycensus::get_acs(variables = c('B25046_001','B08015_001'), year = 2023, geography = 'block group', state = unique(metro_counties$state))
+# temp %>% 
+#   group_by(variable) %>%
+#   summarize(
+#     n(), sum(!is.na(estimate))
+#   )  # - so only B25046_001 works at BG level
+# 
+# # Let's try Tract
+# temp <- tidycensus::get_acs(variables = c('B25046_001','B08015_001'), year = 2023, geography = 'tract', state = unique(metro_counties$state))
+# # ok so B08015_001 is at the tract level
+# 
+# 
+# dfs.car_ownership <- list()
+# 
+# for(m in unique(STATES.counties$metro)) {
+#   cat(paste0(m, '..'))
+#   # filter to dict
+#   metro_counties <- 
+#     STATES.counties %>%
+#     filter(metro == m)
+#   
+#   dfs.med_inc[[m]] <- 
+#     tidycensus::get_acs(variables = 'B19049_001', year = 2023, geography = 'block group', state = unique(metro_counties$state)) %>%
+#     mutate(fips5 = substr(GEOID, 1,5)) %>%
+#     inner_join(
+#       metro_counties,
+#       by = c('fips5' = 'fips5')
+#     )
+# }
+```
+
+# Actual Census run
+```{r act}
+# Gather census vars:
+# - Identify vars
+
+census_vars <- c('total_pop' = 'B01003_001', 'n_veh_available' = 'B25046_001', 'n_veh_commute' = 'B08015_001', 'medinc' = 'B19049_001')
+dfs.census <- list()
+for(m in unique(STATES.counties$metro)) {
+  cat(paste0(m, '..'))
+  # filter to dict
+  metro_counties <- 
+    STATES.counties %>%
+    filter(metro == m)
+  
+  # - get at Block group level
+  df.census.bg <- tidycensus::get_acs(variables = census_vars, year = 2023, geography = 'block group', state=unique(metro_counties$state)) %>% 
+    pivot_wider(id_cols = 'GEOID', names_from = 'variable', values_from = 'estimate') %>% 
+    mutate(veh_pp = n_veh_available/total_pop, veh_commute_pp = n_veh_commute/total_pop) %>%
+    select(-c(n_veh_commute, n_veh_available))
+  
+  # - get at tract level
+  df.census.tract <- tidycensus::get_acs(variables = census_vars, year = 2023, geography = 'tract', state=unique(metro_counties$state)) %>%
+    pivot_wider(id_cols = 'GEOID', names_from = 'variable', values_from = 'estimate') %>% 
+    mutate(veh_pp = n_veh_available/total_pop, veh_commute_pp = n_veh_commute/total_pop) %>%
+    select(-c(n_veh_commute, n_veh_available))
+  # - get at county level
+  df.census.cty <- 
+    tidycensus::get_acs(variables = census_vars, year = 2023, geography = 'county', state=unique(metro_counties$state)) %>%
+    pivot_wider(id_cols = 'GEOID', names_from = 'variable', values_from = 'estimate') %>% 
+    mutate(veh_pp = n_veh_available/total_pop, veh_commute_pp = n_veh_commute/total_pop) %>%
+    select(-c(n_veh_commute, n_veh_available))
+  # - fill in block group level with census tract level where necessary
+  
+  dfs.census[[m]] <- 
+    df.census.bg %>% 
+    rename(fips12 = GEOID) %>%
+    mutate(
+      fips11 = substr(fips12,1,11),
+      fips5 = substr(fips12,1,5)
+    ) %>%
+    left_join(
+      df.census.tract,
+      by = c('fips11'='GEOID'),
+      suffix = c('','.tract')
+    ) %>%
+    left_join(
+      df.census.cty,
+      by = c('fips5'='GEOID'),
+      suffix = c('','.cty')
+    ) %>%
+    mutate(
+      total_pop = coalesce(total_pop, total_pop.tract, total_pop.cty),
+      level_medinc = if_else(!is.na(medinc), 'bg', if_else(!is.na(medinc.tract), 'tract', if_else(!is.na(medinc.cty), 'cty', 'other'))),
+      level_veh_pp = if_else(!is.na(veh_pp), 'bg', if_else(!is.na(veh_pp.tract), 'tract', if_else(!is.na(veh_pp.cty), 'cty', 'other'))),
+      level_veh_commute_pp = if_else(!is.na(veh_commute_pp), 'bg', if_else(!is.na(veh_commute_pp.tract), 'tract', if_else(!is.na(veh_commute_pp.cty), 'cty', 'other'))),
+      medinc = coalesce(medinc, medinc.tract, medinc.cty),
+      veh_pp = coalesce(veh_pp, veh_pp.tract, veh_pp.cty),
+      veh_commute_pp = coalesce(veh_commute_pp, veh_commute_pp.tract, veh_commute_pp.cty)
+    ) %>%
+    select(
+      fips12, fips5, total_pop, medinc, veh_pp, veh_commute_pp, level_medinc, level_veh_pp, level_veh_commute_pp
+    )
+}
+
+dfs.census %>% 
+  bind_rows(.id='metro') %>%
+  group_by(across(starts_with('level_'))) %>%
+  summarize(n=n()) %>%
+  arrange(desc(n))
+
+# TODO: it is taking some variables at the tract or county level and then dividing by the population at the blockgroup level
+# We need to do the estimates before 
+```
+
+### Normalize
+```{r}
+df_census <- 
+  dfs.census %>%
+  bind_rows(.id='metro') %>%
+  fastDummies::dummy_cols(c('level_medinc', 'level_veh_pp', 'level_veh_commute_pp')) %>%
+  mutate(medinc_Z = as.numeric(scale(medinc)))
+  
+
+df_census %>%
+  write_csv('../data/exports/bg2census.csv')
+```
+
+## Model
+
+
+
+# By BG Dataset
+```{r}
+df_modeling <- 
+  df_combined %>%
+  mutate(
+    dist_1km = dist/1000,
+    extra_zonal = if_else(zone_same, 0, 1),
+    active_share_ = coalesce(active_share,0)/(coalesce(active_share,0) + coalesce(car_share, 0)),
+    total_active = coalesce(active_share,0) * total_trips,
+    extra_county = if_else(substr(fips12_o, 1, 5) != substr(fips12_d, 1, 5), 1, 0),
+    metro_label = case_when(
+      metro == 'nyc' ~ 'New York',
+      metro == 'chi' ~ 'Chicago',
+      metro == 'phi' ~ 'Philadelphia',
+      metro == 'sfba' ~ 'SF Bay Area'
+    )
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_o')),
+    by = c('fips12_o'='fips12_o')
+  ) %>%
+  inner_join(
+    df_census %>%
+      rename_all(~paste0(.x, '_d')),
+    by = c('fips12_d'='fips12_d')
+  )
+  
+```
+
+### Basic tests
+```{r}
+bivariate_model <- lm(active_share ~ extra_zonal, data=df_modeling)
+bivariate_model.wtd <- glm(active_share ~ extra_zonal, data=df_modeling, weights = total_trips, family='binomial')
+summary(bivariate_model)
+summary(bivariate_model.wtd)
+
+library(stargazer)
+stargazer::stargazer(bivariate_model.wtd, type = 'html')
+
+
+# T Test
+t.test(
+  df_modeling %>% filter(extra_zonal == 1) %>% pull('active_share'),
+  df_modeling %>% filter(extra_zonal == 0) %>% pull('active_share'),
+  var.equal = TRUE
+)
+
+mean(df_modeling %>% filter(extra_zonal == 0) %>% pull('active_share'), na.rm=T)
+
+df_modeling %>% 
+  #group_by(metro, metro_label, extra_zonal) %>%
+  filter(dist_1km != 0) %>%
+  group_by(extra_zonal) %>%
+  summarize(
+    n = n(),
+    avg = mean(active_share, na.rm=T),
+    wtd_avg = sum(active_share * total_trips, na.rm=T)/sum(total_trips, na.rm=T)
+  )# %>%
+  ggplot(aes(x = if_else(extra_zonal == 1, 'Extra-Zonal', 'Intra-Zonal'), fill=metro, y = wtd_avg)) + 
+  geom_bar(stat='identity') + 
+  geom_label(aes(label=scales::percent(wtd_avg)), fill='#efefef') + 
+  scale_fill_manual(values=METRO_COLORS, guide=FALSE) + 
+  scale_y_continuous(labels=scales::percent_format()) +
+  labs(
+    x = 'Trip Type',
+    y = 'Share Active Transport (Weighted)'
+  ) + 
+  facet_wrap(~metro_label)
+  pull()
+
+```
+
+### Basic test model
+```{r investigate-data}
+
+nrow(df_combined) # 1.66M
+nrow(df_modeling) # 1.66M
+df_modeling$zone_same
+#test_model <- lm(active_share ~ zone_same, data=dfs %>% bind_rows())
+test_model <- lm(active_share ~ extra_zonal + dist_1km + metro, data=df_modeling)
+summary(test_model)
+coef(test_model)
+
+
+
+
+
+
+```
+
+### Add in income
+```{r add-in-income}
+income_model <- lm(active_share ~ extra_zonal + dist_1km + metro + medinc_Z_d + medinc_Z_o, data=df_modeling)
+summary(income_model)
+coef(income_model)
+car::vif(income_model)
+
+# ok so, including income, its about the same as an additional 180m
+```
+
+so NYC is a huge outlier bc of public transit to cross rivers
+
+### remove Public Transit
+```{r}
+income_model.no_transit <- lm(active_share_ ~ extra_zonal + dist_1km + metro + medinc_Z_d + medinc_Z_o, data=df_modeling)
+summary(income_model.no_transit) # ok so not that different. Still think the river thing is a problem
+
+# We can isolate this by including a "different_county" var
+```
+
+### Include extra-county
+```{r}
+income_model.no_transit.extra_county <- lm(
+  active_share_ ~ extra_zonal + dist_1km + metro + medinc_Z_d + medinc_Z_o + extra_county, 
+  data=df_modeling
+)
+
+summary(income_model.no_transit.extra_county)
+#car::vif(income_model.no_transit.extra_county)
+## Interesting, surprisingly doesn't make that much of a difference
+```
+
+```{r}
+model.extra_county.ny_only <- lm(
+  active_share_ ~ extra_zonal + dist_1km + medinc_Z_d + medinc_Z_o + extra_county, 
+  data=df_modeling %>%
+    filter(metro == 'nyc')
+)
+summary(model.extra_county.ny_only) # so leaving your burrough is close to like 680km and 4 times as powerful as leaving your zone alone.
+# Need a distance to transit, or something about transit because in Chicago this may just be saying people are more likely to use active transit, the further they are from an L stop?
+```
+
+
+
+### Split by Metro
+```{r split-by-metro}
+# sfba
+income_model.sfba <- lm(active_share_ ~ extra_zonal + dist_1km + medinc_Z_d + medinc_Z_o, data=df_modeling %>% filter(metro=='sfba'))
+summary(income_model.sfba)
+coef(income_model.sfba) 
+# leaving zone is about the same as 400 meters
+
+# Chicago
+income_model.chi <- lm(active_share ~ extra_zonal + dist_1km + medinc_Z_d + medinc_Z_o, data=df_modeling %>% filter(metro=='chi'))
+summary(income_model.chi)
+coef(income_model.chi)
+
+# So NYC is a problem, because we need to remove public transit
+```
+
+### Multinomial Logit
+```{r multinomial-logit}
+model.binom <- glm(
+  active_share ~ extra_zonal + dist_1km + d_medinc_Z + o_medinc_Z + extra_county + metro,
+  family = 'binomial',
+  data = df_modeling
+)
+
+summary(model.binom)
+```
+
+### Multinomial Logit - totals
+```{r multinomial-logit}
+df_modeling
+
+model.binom <- glm(
+  active_share ~ extra_zonal + dist_1km + d_medinc_Z + metro + o_medinc_Z + extra_county,# + metro,
+  weights = total_trips,
+  family = 'binomial',
+  data = df_modeling %>% filter(fips12_d != fips12_o)#, metro == 'nyc')
+)
+
+summary(model.binom) # about half a km effect in NYC, but elsewhere it is positive!
+# I think something that is happening is that density is having a major effect here and car ownership
+```
+
+## Redo Modeling with more census Data
+```{r}
+model10 <- glm(
+  #active_share_ ~ extra_zonal + dist_1km + extra_county + medinc_Z_o + medinc_Z_d + veh_pp_o + veh_commute_pp_o, 
+  active_share ~ extra_zonal + dist_1km + medinc_Z_o + medinc_Z_d + metro +  total_trips + public_transit,
+  weights = total_trips,
+  family = 'binomial',
+  data=df_modeling %>%
+    filter(
+      fips12_d != fips12_o#,
+      #metro=='nyc'
+    )
+)
+
+summary(model10)
+car::vif(model10)
+
+df_modeling %>%
+  mutate(self_trip = if_else(dist==0, 'self-trip', 'no-self')) %>%
+  #group_by(self_trip, extra_county, extra_zonal, zone_same) %>%
+  group_by(metro_label, extra_zonal) %>%
+  summarize(
+    n_bg_pairs=n(),
+    active_share_ = sum(active_share_ * total_trips, na.rm=T)/sum(total_trips, na.rm=T),
+    mean_dist = sum(dist * total_trips, na.rm=T)/sum(total_trips, na.rm=T),
+    total_trips=sum(total_trips)
+  ) %>%
+  #ggplot(aes(x = if_else(extra_zonal==1, 'Outside of Zone', 'Intra-Zone'), y = active_share_)) + 
+  ggplot(aes(x = if_else(extra_zonal==1, 'Outside of Zone', 'Intra-Zone'), y = mean_dist)) + 
+  geom_bar(stat='identity') + 
+  labs(
+    x = 'Trip Type',
+    y = 'Share of Trip Active'
+  ) + 
+  # scale_y_continuous(labels=scales::percent_format()) + 
+  scale_y_continuous(labels=scales::number_format()) + 
+  facet_wrap(~metro_label)
+
+sum(is.na(df_modeling$total_trips))
+sum(is.na(df_modeling$active_share_)) # 68457
+sum(is.na(df_modeling$active_share)) # 11,215
+
+# here says its close to 420m
+#summary(lm(active_share_ ~ extra_zonal + dist_1km + extra_county + medinc_Z_o + medinc_Z_d + total_pop_o + total_pop_d + veh_pp_o + veh_pp_d + veh_commute_pp_o + veh_commute_pp_d, data=df_modeling %>% filter(metro == 'chi')))
+```
+
+## Descriptive Data
+
+### 
+```{r}
+df_modeling %>%
+  group_by(metro, metro_label, zoneID_o) %>%
+  summarize(
+    n_BGs = n_distinct(fips12_o),
+    total_trips = sum(total_trips)
+  ) %>%
+  ggplot(aes(x=n_BGs)) + 
+  geom_histogram(aes(fill=metro)) + 
+  facet_wrap(~metro_label) + 
+  scale_fill_manual(values=METRO_COLORS, guide=FALSE) + 
+  scale_x_continuous(labels=scales::number) + 
+  labs(
+    y = 'Count of Distinct Zones',
+    x = 'Number of Block Groups in Each Zone'
+  )
+```
+
+### N zones
+```{r}
+
+n_zones <- 
+  tribble(
+    ~metro, ~`Total Zones`, ~`> 1km`, ~`Match to BG`,
+    'chi', 1994, 54, 54,
+    'phi', 291, 15, 15,
+    'nyc', 1683, 79, 89,
+    'sfba', 3573, 70, 63
+  )
+n_zones %>%
+  mutate(
+    metro_label = case_when(
+      metro == 'nyc' ~ 'New York',
+      metro == 'chi' ~ 'Chicago',
+      metro == 'phi' ~ 'Philadelphia',
+      metro == 'sfba' ~ 'SF Bay Area'
+    )
+  ) %>%
+  mutate(across(is.numeric, ~ .x/`Total Zones`, .names = '{.col}__share')) %>%
+  pivot_longer(cols = -c('metro','metro_label')) %>%
+  separate(name, into=c('name','name2'), sep='__') %>%
+  mutate(name2 = coalesce(name2, 'raw')) %>%
+  pivot_wider(names_from='name2', values_from='value') %>%
+  ggplot(aes(x = fct_inorder(name), fill=metro, y = share, label=paste0(scales::comma(raw), if_else(share != 1, paste0(' (',scales::percent(share, accuracy=1L), ')'), '')))) + 
+  geom_bar(stat='identity') + 
+  scale_fill_manual(values=METRO_COLORS, guide=FALSE) + 
+  scale_y_continuous(labels=scales::percent_format()) + 
+  geom_label(fill='#efefef', nudge_y = -.01) + 
+  labs(
+    x = NULL,
+    y = NULL
+  ) + 
+  facet_wrap(~metro_label, scale='free_y')
+```
+
+### Trip Distance 
+```{r}
+df_modeling %>%
+  
+```
+
+### Active Share by intra/extra-zonal
+```{r active-share by intra/extra-zonal}
+df_modeling %>%
+  group_by(metro_label, extra_county, extra_zonal) %>%
+  summarize(
+    n = n(), 
+    total_trips_sum = sum(total_trips), 
+    active_share = weighted.mean(active_share, total_trips, na.rm = T)
+  ) %>%
+  mutate(
+    extra_county = if_else(extra_county == 1, 'Extra-County', 'Intra-County'),
+    extra_zonal = if_else(extra_zonal == 1, 'Extra-Zonal', 'Intra-Zonal'),
+    combined = paste(extra_county, '~\n', extra_zonal)
+  ) %>%
+  ggplot(aes(x = as_factor(combined), group=as_factor(combined), y = active_share, fill=total_trips_sum)) + 
+  geom_bar(stat = 'identity', position='dodge') + 
+  scale_y_continuous(labels=scales::percent_format(), limits = c(0,1)) + 
+  scale_fill_gradient(low = '#a0a0a0', high='dodgerblue4', labels=scales::number_format(scale=1/100000, suffix = 'M')) +
+  theme(
+    axis.text.x.bottom = element_text(angle = 0, vjust=.5)
+  ) + 
+  labs(
+    fill = 'Total_trips',
+    y = 'Active Share',
+    x = 'Location'
+  ) + 
+  geom_label(aes(label=scales::percent(active_share, accuracy=.1)), fill='#efefef') + 
+  facet_wrap(~metro_label)
+
+```
+
+## Summary Stats & Plots
+```{r}
+library(vtable)
+df_modeling %>% 
+  select(dist_1km, active_share_, extra_zonal, metro = metro_label, total_trips) %>%
+  st(group='metro',group.long=TRUE, add.median = TRUE, group.weights = 'total_trips')
+```
+
+```{r}
+METRO_COLORS <- RColorBrewer::brewer.pal(4, 'Pastel2')
+#colorspace::hcl_
+METRO_COLORS <- c('chi' = '#0E3386', 'sfba' = '#fe5a1d', 'phi' = '#004C54', 'nyc' = 'grey65')
+```
+
+### histogram trips
+```{r}
+df_modeling %>%
+  filter(fips12_o != fips12_d) %>%
+  # ggplot(aes(x = active_share_)) +
+  ggplot(aes(x = active_share_, weight=total_trips)) + 
+  geom_histogram(fill = 'indianred2') + 
+  # Scales
+  scale_x_continuous(labels=scales::percent_format()) + 
+  scale_y_continuous(labels=scales::number_format(scale=1/1000, suffix='k')) + 
+  scale_fill_manual(values=METRO_COLORS, guide=FALSE) + 
+  # Labels
+  labs(
+    x = 'Active Share',
+    y = 'Total Trips'
+    #y = 'Block Group Pairs'
+  )# +
+  #facet_wrap(~metro_label, scale='free_y')
+```
+### histogram trips - metro
+
+```{r}
+
+df_modeling %>%
+  filter(fips12_o != fips12_d) %>%
+  ggplot(aes(x = active_share_, fill = metro)) + 
+  # ggplot(aes(x = active_share_, weight=total_trips, fill=metro)) + 
+  geom_histogram() + 
+  # Scales
+  scale_x_continuous(labels=scales::percent_format()) + 
+  scale_y_continuous(labels=scales::number_format(scale=1/1000, suffix='k')) + 
+  scale_fill_manual(values=METRO_COLORS, guide=FALSE) + 
+  # Labels
+  labs(
+    x = 'Active Share',
+    y = 'Block Group pairs'
+  ) +
+  facet_wrap(~metro_label, scale='free_y')
+```
+
+
+## Statistical Tests
+### T-test
+```{r}
+install.packages('infer')
+df_modeling %>%
+  infer::t_test(active_share ~ extra_zonal, weight)
+
+df_modeling %>%
+  filter(metro == 'phi') %>%
+  head(10) %>%
+  select(fips12_o, fips12_d, total_trips, dist, active_share_, car_share) -> test
+  
+test %>%
+  purrr::walk(
+    #\(x) rep(c(x$fips12_o, x$fips12_d, 1, x$dist, x$active_share_, x$car_share), x$total_trips),
+    #\(x) print(x['fips12_p']),
+    function(x) print(x),
+    .progress = TRUE
+  )
+
+for(i in test) {
+  print(i)
+}
+
+df_modeling
+
+#replicate(test[1,]$total_trips, test[1,], simplify='list') %>% data.frame() %>% t() %>% as_tibble()
+```
+
+```{python}
+!pip install statsmodels
+import statsmodels.api as sm
+```
