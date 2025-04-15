@@ -1,0 +1,8 @@
+.DS_Store
+cache/*
+code/cache/*
+data/
+data.nosync/
+.env
+.Rhistory
+*.pyc
